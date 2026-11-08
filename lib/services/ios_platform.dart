@@ -352,9 +352,15 @@ class _IosPlayer {
       player.stream.completed.listen((v) => event('completed', v)),
       player.stream.width.listen((_) => _size()),
       player.stream.height.listen((_) => _size()),
-      player.stream.error.listen(
-        (_) => event('error', {'message': '媒体播放失败，请重试或切换清晰度'}),
+      // 真机上没有 Xcode 也没有 idevicesyslog，mpv 的原始日志只能落进
+      // 应用内日志页（我的 → 设置 → 服务 → 运行日志），否则排障是瞎猜。
+      player.stream.log.listen(
+        (log) => AppLog.d('mpv', '${log.level}: ${log.text}'),
       ),
+      player.stream.error.listen((message) {
+        AppLog.e('mpv', 'player error: $message');
+        event('error', {'message': '媒体播放失败，请重试或切换清晰度'});
+      }),
     ]);
     unawaited(
       video.waitUntilFirstFrameRendered.then((_) => event('firstFrame', true)),
@@ -396,6 +402,7 @@ class _IosPlayer {
       emit({'playerId': id, 'type': 'created', 'value': id});
       _size();
     } catch (error) {
+      AppLog.e('ios-player', 'id=$id open failed', error: error);
       if (!ready.isCompleted) ready.completeError(StateError('无法打开媒体'));
       final value = desktopOpenFailure(id, error);
       if (!disposed) {

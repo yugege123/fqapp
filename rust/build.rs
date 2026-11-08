@@ -1,5 +1,7 @@
 fn main() {
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+    // Windows 与 iOS 共用同一份 CENC C 实现；其它目标不编 C。
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os != "windows" && os != "ios" {
         return;
     }
     let sources = [

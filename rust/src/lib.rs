@@ -35,7 +35,9 @@ pub mod upstream;
 
 mod frb_generated;
 
-#[cfg(target_os = "windows")]
+// 带密钥（CENC）的片源靠这套回环内核解密：Windows 与 iOS 都用它，
+// 见 lib/services/desktop_media.dart 的 DynamicLibrary.process() 查找。
+#[cfg(any(target_os = "windows", target_os = "ios"))]
 mod desktop_fetch;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "ios"))]
 mod desktop_media;

@@ -46,6 +46,11 @@ cc = "1"
 [target.'cfg(windows)'.dependencies]
 reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
 
+# iOS 与 Windows 共用同一套「CENC 回环」内核（desktop_media / desktop_fetch
+# 在这两个目标上编译），所以同样需要 reqwest 的阻塞客户端。
+[target.'cfg(target_os = "ios")'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
+
 # The shipping app runs the core in-process on Android; `adb logcat` is the
 # only observability surface it has. Desktop/test builds keep log macros as
 # no-ops (no logger is installed there).
