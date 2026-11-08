@@ -98,7 +98,19 @@ jobs:
           pod --version
 
       - name: Build the Rust core as an iOS static library
-        run: ./scripts/build_rust_ios.sh
+        # 仓库里的 scripts/*.sh 在 git 里都是 644（没有可执行位），
+        # 所以必须用 bash 调，不能写 ./scripts/xxx.sh —— 那样会
+        # Permission denied，而且失败信息看不出原因。
+        run: |
+          set +e
+          bash ./scripts/build_rust_ios.sh > /tmp/rust-ios.log 2>&1
+          status=$?
+          tail -n 20 /tmp/rust-ios.log
+          if [ "$status" -ne 0 ]; then
+            grep -E 'error(\[|:)|failed|cannot|Permission denied' /tmp/rust-ios.log \
+              | tail -n 8 | sed 's/^/::error::/'
+            exit "$status"
+          fi
 
       - name: Verify the static library is not empty
         run: |
@@ -110,7 +122,17 @@ jobs:
             || { echo '::error::fq_desktop_media_open is missing from the static library'; exit 1; }
 
       - name: Build Runner.app (unsigned)
-        run: flutter build ios --release --no-codesign --no-pub
+        run: |
+          set +e
+          flutter build ios --release --no-codesign --no-pub \
+            > /tmp/ios-build.log 2>&1
+          status=$?
+          tail -n 40 /tmp/ios-build.log
+          if [ "$status" -ne 0 ]; then
+            grep -E 'error:|error |Error|failed|cannot|Undefined symbol' \
+              /tmp/ios-build.log | tail -n 8 | sed 's/^/::error::/'
+            exit "$status"
+          fi
 
       - name: Package the unsigned IPA
         run: |
