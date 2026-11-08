@@ -114,12 +114,23 @@ jobs:
 
       - name: Verify the static library is not empty
         run: |
+          set -euo pipefail
           test -s ios/Frameworks/libfqapi_core.a
           ls -lh ios/Frameworks/libfqapi_core.a
           lipo -info ios/Frameworks/libfqapi_core.a
           # dlsym 只能在导出符号里找到入口：这条闸门防止 strip 把符号裁掉。
-          nm -gU ios/Frameworks/libfqapi_core.a | grep -q 'fq_desktop_media_open' \
-            || { echo '::error::fq_desktop_media_open is missing from the static library'; exit 1; }
+          # macOS 的 nm 里 -U 是「只列未定义符号」，已定义的外部符号只加 -g；
+          # 且 C 符号带下划线前缀（_fq_desktop_media_open），所以用子串匹配。
+          symbols=$(nm -g ios/Frameworks/libfqapi_core.a 2>/dev/null || true)
+          printf '%s\n' "$symbols" | grep -c ' T ' | sed 's/^/defined text symbols: /' || true
+          for name in fq_desktop_media_open fq_desktop_media_close fq_desktop_media_free; do
+            if ! printf '%s' "$symbols" | grep -q "$name"; then
+              echo "::error::missing symbol $name in libfqapi_core.a"
+              printf '%s\n' "$symbols" | head -n 30
+              exit 1
+            fi
+          done
+          echo "rust core symbols present"
 
       - name: Build Runner.app (unsigned)
         run: |
