@@ -4,6 +4,7 @@ import 'services/native_player.dart';
 import 'services/desktop_platform.dart';
 import 'services/platform_capabilities.dart';
 import 'services/platform_channel.dart';
+import 'services/ios_platform.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 
 import 'dart:async';
+import 'dart:io';
 
 import 'pages/home_page.dart';
 import 'pages/audio_page.dart';
@@ -78,7 +80,13 @@ Future<void> main() async {
 /// 这些都不决定界面能不能起来，所以失败只记日志（见 [main]）。
 Future<void> _prepareRuntime() async {
   registerPortedUiLicenses();
-  if (isWindowsDesktop) await DesktopPlatform.instance.initialize();
+  if (isWindowsDesktop) {
+    await DesktopPlatform.instance.initialize();
+  } else if (Platform.isIOS) {
+    // iOS：把 fqapp/native_player、fqapp/system_tts 就地接到 media_kit /
+    // flutter_tts 上，契约与 Windows 后端一致（见 ios_platform.dart）。
+    await IosPlatform.instance.initialize();
+  }
   // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
   // [main] 的 runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
   AppLog.instance.install();
@@ -670,8 +678,8 @@ class _RootShellState extends State<RootShell> {
               scrollController: _homeScroll,
               cueLoader: ApiClient.instance.searchCue,
             ),
-            // iOS 首版没有原生播放器实现：把短剧页换成「暂不支持」占位，
-            // 避免进入播放页时触发缺失的 fqapp/native_player 通道。
+            // 没有视频后端（目前只剩未接的桌面变体或 web）时，把短剧页
+            // 换成「暂不支持」占位，避免进入播放页触发缺失的通道。
             if (supportsVideoPlayback)
               const DramaPage()
             else

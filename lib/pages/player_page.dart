@@ -28,6 +28,7 @@ import '../services/connectivity_status.dart';
 import 'drama_download_sheet.dart';
 import '../services/library_store.dart';
 import '../services/native_player.dart';
+import '../services/video_surface.dart';
 import '../services/playback_issue.dart';
 import '../services/player_history.dart';
 import '../services/video_catalogue.dart';
@@ -1974,15 +1975,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (texture != null)
           RotatedBox(
             quarterTurns: _player!.videoRotationCorrection ~/ 90,
-            child: isWindowsDesktop
-                ? DesktopPlatform.instance.videoSurface(
-                    texture,
-                    key: const ValueKey('player-texture'),
-                  )
-                : Texture(
-                    key: const ValueKey('player-texture'),
-                    textureId: texture,
-                  ),
+            child: videoSurfaceFor(
+              texture,
+              key: const ValueKey('player-texture'),
+            ),
           ),
         if (_error != null)
           PlayerErrorFeedback(

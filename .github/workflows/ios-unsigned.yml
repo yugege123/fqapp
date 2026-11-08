@@ -1,0 +1,149 @@
+name: iOS unsigned IPA
+
+# 没有 Mac 也想拿到安装包：在 GitHub 的 macOS runner 上编 iOS，
+# 产物是**未签名**的 Runner.app → .ipa，下载后自己在 Windows 侧签。
+# 签名（免费 Apple ID 7 天 / 付费开发者账号 1 年）不在 CI 里做，
+# 因为那需要把证书和私钥放进仓库 secret，风险不对等。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, listen-follow, listen-follow-ex]
+    tags: ['v*']
+    paths:
+      - 'lib/**'
+      - 'ios/**'
+      - 'rust/**'
+      - 'native/**'
+      - 'assets/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'analysis_options.yaml'
+      - 'flutter_rust_bridge.yaml'
+      - 'scripts/build_rust_ios.sh'
+      - 'scripts/generate_ios_app_icon.py'
+      - '.github/workflows/ios-unsigned.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与 android-apk.yml 同一个版本：pubspec.lock 是按 3.47 解析的，
+  # iOS 侧还需要 Xcode 27 的适配补丁（3.47.0 起才有）。
+  FLUTTER_VERSION: '3.47.9'
+  FRB_VERSION: '2.13.0'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ipa:
+    # macos-15 自带 Xcode 16；需要 Xcode 27 时把下面 Select Xcode 那步
+    # 换成自备的 Xcode 路径（或 self-hosted runner）。
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: app
+
+    steps:
+      - name: Check out app source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+          persist-credentials: false
+
+      - name: Report toolchain versions
+        run: |
+          xcodebuild -version
+          xcode-select -p
+          sw_vers
+
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+          # 真机片 + 模拟器片：build_rust_ios.sh 默认只编 aarch64-apple-ios，
+          # 多装两个 target 是为了后面 --simulator 也能直接跑。
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+
+      - name: Cache the Cargo build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: app/rust
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      # Xcode 27 + Swift Package Manager 有已知构建失败，官方 iOS 文档也这么关。
+      - name: Disable Swift Package Manager
+        run: flutter config --no-enable-swift-package-manager
+
+      # 不用 --enforce-lockfile：加了 media_kit_libs_ios_video 之后
+      # pubspec.lock 需要在有 Flutter SDK 的机器上重新解析，这里让它自己更新。
+      - name: Resolve Dart package dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods
+        run: |
+          # ruby 自带的 gem 装 cocoapods 会撞权限/版本，runner 上直接 brew。
+          brew install cocoapods || true
+          pod --version
+
+      - name: Build the Rust core as an iOS static library
+        run: ./scripts/build_rust_ios.sh
+
+      - name: Verify the static library is not empty
+        run: |
+          test -s ios/Frameworks/libfqapi_core.a
+          ls -lh ios/Frameworks/libfqapi_core.a
+          lipo -info ios/Frameworks/libfqapi_core.a
+          # dlsym 只能在导出符号里找到入口：这条闸门防止 strip 把符号裁掉。
+          nm -gU ios/Frameworks/libfqapi_core.a | grep -q 'fq_desktop_media_open' \
+            || { echo '::error::fq_desktop_media_open is missing from the static library'; exit 1; }
+
+      - name: Build Runner.app (unsigned)
+        run: flutter build ios --release --no-codesign --no-pub
+
+      - name: Package the unsigned IPA
+        run: |
+          rm -rf build/ipa && mkdir -p build/ipa/Payload
+          ditto build/ios/iphoneos/Runner.app build/ipa/Payload/Runner.app
+          (cd build/ipa && zip -qry fqapp_ios_unsigned.ipa Payload)
+          ls -lh build/ipa/fqapp_ios_unsigned.ipa
+
+      - name: Write build notes
+        run: |
+          {
+            printf 'App commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Flutter: `%s` | Rust: `1.99.1` | flutter_rust_bridge: `%s`\n\n' "$FLUTTER_VERSION" "$FRB_VERSION"
+            printf '产物是**未签名** IPA：用 Windows 侧载工具（Sideloadly / AltStore）\n'
+            printf '配自己的 Apple ID 重签后安装。免费账号签出来的包 7 天后失效。\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the unsigned IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fqapp-ios-unsigned-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+          path: app/build/ipa/fqapp_ios_unsigned.ipa
+
+      - name: Retain diagnostics if the build fails
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fqapp-ios-diagnostics-${{ github.run_number }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            app/build/ios/iphoneos/Runner.app/Info.plist
+            app/ios/Frameworks/*.a

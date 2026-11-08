@@ -22,6 +22,7 @@ import '../services/inline_video_playback.dart';
 
 import '../services/library_store.dart';
 import '../services/native_player.dart';
+import '../services/video_surface.dart';
 import '../services/playback_format.dart';
 import '../services/player_history.dart';
 import '../services/video_catalogue.dart';
@@ -3995,17 +3996,10 @@ class _InlineVideoLayer extends StatelessWidget {
                     rect: layout.video,
                     child: RotatedBox(
                       quarterTurns: playback.rotation.value,
-                      child: isWindowsDesktop
-                          ? DesktopPlatform.instance.videoSurface(
-                              textureId,
-                              key: ValueKey('drama_inline_${item.id}'),
-                            )
-                          : Texture(
-                              key: ValueKey(
-                                'drama_inline_texture_${item.kind}_${item.id}',
-                              ),
-                              textureId: textureId,
-                            ),
+                      child: videoSurfaceFor(
+                        textureId,
+                        key: ValueKey('drama_inline_${item.id}'),
+                      ),
                     ),
                   ),
                 // A first-frame event may beat the size event. Never expose a

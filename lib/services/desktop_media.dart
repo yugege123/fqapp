@@ -19,6 +19,12 @@ String desktopCoreLibraryPath() {
   return File('rust/target/release/fqapi_core.dll').absolute.path;
 }
 
+/// Rust core entry points. On desktop this is the bundled `fqapi_core.dll`;
+/// on iOS the core is linked into the main binary (static library + force_load),
+/// so the symbols are looked up in the process itself.
+DynamicLibrary coreLibrary(String path) =>
+    Platform.isIOS ? DynamicLibrary.process() : DynamicLibrary.open(path);
+
 /// A failed media session open. [message] is a fixed user-facing string from
 /// the native core; it never carries the URL or key.
 class DesktopMediaException implements Exception {
@@ -76,7 +82,7 @@ class DesktopMedia {
     final path = desktopCoreLibraryPath();
     // Metadata probing performs synchronous native I/O, away from the UI isolate.
     final result = await Isolate.run(() {
-      final lib = DynamicLibrary.open(path);
+      final lib = coreLibrary(path);
       final open = lib.lookupFunction<_OpenNative, _Open>(
         'fq_desktop_media_open',
       );
@@ -113,7 +119,7 @@ class DesktopMedia {
   void close() {
     if (_closed) return;
     _closed = true;
-    final lib = DynamicLibrary.open(libraryPath);
+    final lib = coreLibrary(libraryPath);
     final close = lib.lookupFunction<_FreeNative, _Free>(
       'fq_desktop_media_close',
     );
