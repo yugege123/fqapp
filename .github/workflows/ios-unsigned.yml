@@ -97,6 +97,32 @@ jobs:
           brew install cocoapods || true
           pod --version
 
+      - name: Patch connectivity_plus (iOS 26-only NWPath API)
+        # connectivity_plus 7.3.1 里有这么一行：
+        #   if #available(iOS 26.0, *), path.isUltraConstrained { types.append(.satellite) }
+        # 该属性只存在于 iOS 26 SDK；runner 的 Xcode 没有这个声明，即使带
+        # #available 也会 Swift 编译失败。卫星网络分类跟本 App 无关，
+        # 这里直接把那一支删掉（只改 CI 里的 pub-cache，不动仓库源码）。
+        run: |
+          set -euo pipefail
+          dirs="$HOME/.pub-cache"
+          if [ -n "${PUB_CACHE:-}" ]; then dirs="$dirs $PUB_CACHE"; fi
+          hit=0
+          for f in $(find $dirs -path '*connectivity_plus*/PathMonitorConnectivityProvider.swift' 2>/dev/null); do
+            hit=1
+            perl -0777 -i -pe 's/\n[ \t]*if #available\(iOS 26\.0, \*\), path\.isUltraConstrained \{\n[ \t]*types\.append\(\.satellite\)\n[ \t]*\}\n/\n/' "$f"
+            if grep -q 'isUltraConstrained' "$f"; then
+              echo "::error::connectivity_plus patch did not apply to $f"
+              exit 1
+            fi
+            echo "patched $f"
+          done
+          if [ "$hit" -eq 0 ]; then
+            echo '::error::connectivity_plus Swift source not found in the pub cache'
+            exit 1
+          fi
+          echo 'connectivity_plus patched'
+
       - name: Build the Rust core as an iOS static library
         # 仓库里的 scripts/*.sh 在 git 里都是 644（没有可执行位），
         # 所以必须用 bash 调，不能写 ./scripts/xxx.sh —— 那样会
